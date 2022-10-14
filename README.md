@@ -1,90 +1,123 @@
-# SequelizeTransparentCache
+# sequelize-transparent-cache
 
-This project was generated using [Nx](https://nx.dev).
+[![Build Status](https://travis-ci.org/DanielHreben/sequelize-transparent-cache.svg?branch=master)](https://travis-ci.org/DanielHreben/sequelize-transparent-cache)
+[![Coverage Status](https://codecov.io/gh/DanielHreben/sequelize-transparent-cache/branch/master/graph/badge.svg)](https://codecov.io/gh/DanielHreben/sequelize-transparent-cache)
+[![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+[![Code Climate](https://codeclimate.com/github/DanielHreben/sequelize-transparent-cache/badges/gpa.svg)](https://codeclimate.com/github/DanielHreben/sequelize-transparent-cache)
+[![npm version](https://badge.fury.io/js/sequelize-transparent-cache.svg)](https://badge.fury.io/js/sequelize-transparent-cache)
+[![Dependency Status](https://david-dm.org/DanielHreben/sequelize-transparent-cache.svg)](https://www.versioneye.com/user/projects/5922c858da94de003b9f63af)
 
-<p style="text-align: center;"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="450"></p>
+Simple to use and universal cache layer for Sequelize.
 
-🔎 **Smart, Fast and Extensible Build System**
+* Abstract: does not depends on underlying database, or cache specific
+* Transparent: objects returned from cache are regular Sequelize instances with all your methods
+* Explicit: all calls to cache comes through `cache()` method
+* Lightweight: zero additional dependencies
 
-## Adding capabilities to your workspace
+## Installation
 
-Nx supports many plugins which add capabilities for developing different types of applications and different tools.
+Install sequelize-transparent-cache itself:
 
-These capabilities include generating applications, libraries, etc as well as the devtools to test, and build projects as well.
+```npm install --save sequelize-transparent-cache```
 
-Below are our core plugins:
+Find and install appropriate adaptor for your cache system, see "Available adaptors" section below.
+In this example we will use [ioredis](https://www.npmjs.com/package/ioredis)
 
-- [React](https://reactjs.org)
-  - `npm install --save-dev @nrwl/react`
-- Web (no framework frontends)
-  - `npm install --save-dev @nrwl/web`
-- [Angular](https://angular.io)
-  - `npm install --save-dev @nrwl/angular`
-- [Nest](https://nestjs.com)
-  - `npm install --save-dev @nrwl/nest`
-- [Express](https://expressjs.com)
-  - `npm install --save-dev @nrwl/express`
-- [Node](https://nodejs.org)
-  - `npm install --save-dev @nrwl/node`
+```npm install --save sequelize-transparent-cache-ioredis```
 
-There are also many [community plugins](https://nx.dev/community) you could add.
+## Example usage
 
-## Generate an application
+```ts
+import Redis from 'ioredis'
+import { IORedisAdaptor } from '@sequelize-transparent-cache/ioredis'
 
-Run `nx g @nrwl/react:app my-app` to generate an application.
+const redis = new Redis()
 
-> You can use any of the plugins above to generate applications as well.
+const redisAdaptor = new RedisAdaptor({
+  client: redis,
+  namespace: 'model',
+  lifetime: 60 * 60
+})
 
-When using Nx, you can create multiple applications and libraries in the same workspace.
+const sequelizeCache = require('sequelize-transparent-cache')
+const { withCache } = sequelizeCache(redisAdaptor)
 
-## Generate a library
+const Sequelize = require('sequelize')
+const sequelize = new Sequelize('database', 'user', 'password', {
+  dialect: 'mysql',
+  host: 'localhost',
+  port: 3306
+})
 
-Run `nx g @nrwl/react:lib my-lib` to generate a library.
+// Register and wrap your models:
+// withCache() will add cache() methods to all models and instances in sequelize v4
+const User = withCache(sequelize.import('./models/user'))
 
-> You can also use any of the plugins above to generate libraries as well.
+await sequelize.sync()
 
-Libraries are shareable across libraries and applications. They can be imported from `@sequelize-transparent-cache/mylib`.
+// Cache result of arbitrary query - requires cache key
+await User.cache('active-users').findAll({
+  where: {
+    status: 'ACTIVE'
+  }
+})
 
-## Development server
+// Create user in db and in cache
+await User.cache().create({
+  id: 1,
+  name: 'Daniel'
+})
 
-Run `nx serve my-app` for a dev server. Navigate to http://localhost:4200/. The app will automatically reload if you change any of the source files.
+// Load user from cache
+const user = await User.cache().findByPk(1);
 
-## Code scaffolding
+// Update in db and cache
+await user.cache().update({
+  name: 'Vikki'
+})
 
-Run `nx g @nrwl/react:component my-component --project=my-app` to generate a new component.
+```
 
-## Build
+Look for all examples applications in `examples` folder.
 
-Run `nx build my-app` to build the project. The build artifacts will be stored in the `dist/` directory. Use the `--prod` flag for a production build.
+* [Usage with memcached](https://github.com/DanielHreben/sequelize-transparent-cache/blob/master/examples/memcached-mysql)
+* [Usage with ioredis](https://github.com/DanielHreben/sequelize-transparent-cache/blob/master/examples/redis-mysql)
 
-## Running unit tests
+## Methods
 
-Run `nx test my-app` to execute the unit tests via [Jest](https://jestjs.io).
+Object returned by `cache()` call contains wrappers for **limited subset** of sequelize model or instance methods.
 
-Run `nx affected:test` to execute the unit tests affected by a change.
+Instance:
 
-## Running end-to-end tests
+* [`save()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#instance-method-save)
+* [`update()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-update)
+* [`destroy()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#instance-method-destroy)
+* [`reload()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#instance-method-reload)
 
-Run `nx e2e my-app` to execute the end-to-end tests via [Cypress](https://www.cypress.io).
+Model:
+* Automatic cache methods - does not require cache key: `cache()`
+  * [`create()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-create)
+  * [`findByPk()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-findByPk)
+  * [`upsert()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-upsert) - **EXPERIMENTAL**
+  * [`insertOrUpdate()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-upsert) - **EXPERIMENTAL**
+* Manual cache methods - require cache key: `cache(key)`
+  * [`findAll()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-findAll)
+  * [`findOne()`](http://docs.sequelizejs.com/class/lib/model.js~Model.html#static-method-findOne)
+  * `clear()` - remove data associated with key from cache
 
-Run `nx affected:e2e` to execute the end-to-end tests affected by a change.
+In addition, both objects will contain `client()` method to get cache adaptor.
 
-## Understand your workspace
+## Available adaptors
 
-Run `nx graph` to see a diagram of the dependencies of your projects.
+* [memcached](https://www.npmjs.com/package/sequelize-transparent-cache-memcached)
+* [memcache-plus](https://www.npmjs.com/package/sequelize-transparent-cache-memcache-plus)
+* [ioredis](https://www.npmjs.com/package/sequelize-transparent-cache-ioredis)
+* [variable](https://www.npmjs.com/package/sequelize-transparent-cache-variable)
 
-## Further help
+You can easy write your own adaptor. Each adaptor must implement 3 methods:
 
-Visit the [Nx Documentation](https://nx.dev) to learn more.
+* `get(path: Array<string>): Promise<object>`
+* `set(path: Array<string>, value: object): Promise<void>`
+* `del(path: Array<string>): Promise<void>`
 
-## ☁ Nx Cloud
-
-### Distributed Computation Caching & Distributed Task Execution
-
-<p style="text-align: center;"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-cloud-card.png"></p>
-
-Nx Cloud pairs with Nx in order to enable you to build and test code more rapidly, by up to 10 times. Even teams that are new to Nx can connect to Nx Cloud and start saving time instantly.
-
-Teams using Nx gain the advantage of building full-stack applications with their preferred framework alongside Nx’s advanced code generation and project dependency graph, plus a unified experience for both frontend and backend developers.
-
-Visit [Nx Cloud](https://nx.app/) to learn more.
+Checkout existed adaptors for reference implementation.
